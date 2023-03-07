@@ -3,7 +3,7 @@
 #SBATCH -C cpu
 #SBATCH -q debug
 #SBATCH -J mpitest
-#SBATCH --ntasks-per-node=68
+#SBATCH --ntasks-per-node=32
 #SBATCH -t 00:30:00
 
 #modules
