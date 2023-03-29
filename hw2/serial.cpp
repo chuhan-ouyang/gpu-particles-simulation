@@ -12,7 +12,6 @@ int* binCounts; // binCounts[i] is the number of particles in the ith bin
 int* binOffsets; // each bin hold binOffsets[i]...binOffsets[i + 1] particles (inclusive left, exclusive rights)
 // in the binIndices array
 int* binIndices; // indices of particles in the parts array, sorted by bin ids
-int* binUpdateCounter; // binUpdateCounter[i] = the next empty element in a bin's region
 // in binIndices array that we can insert element into
 
 // Apply the force from neighbor to particle
@@ -68,7 +67,6 @@ void init_simulation(particle_t* parts, int num_parts, double size) {
 
     binCounts = new int[totalBins];  
     binOffsets = new int[totalBins + 1];  
-    binUpdateCounter = new int[totalBins];
 }
 
 
@@ -88,55 +86,17 @@ void simulate_one_step(particle_t* parts, int num_parts, double size) {
 
     // prefix sum
     binOffsets[0] = 0;
-    binUpdateCounter[0] = 0;
     for (int i = 0; i < totalBins; ++i){
         binOffsets[i + 1] = binOffsets[i] + binCounts[i];
-        binUpdateCounter[i] = binOffsets[i]; // initially the same as binOffsets
     }
     
-    cout << "one step and num parts and total bins" << num_parts << ", " << totalBins << endl; 
-    cout << "debugging myBin" << endl;
-    for (int i = 0; i < num_parts; ++i){
-        cout << myBin[i] << ",";
-    }
-    cout << endl;
-
-    cout << "debugging bin counts " << endl;
-    for (int i = 0; i < totalBins; ++i){
-        cout << binCounts[i] << ",";
-    }
-    cout << endl;
-
-    cout << "debugging bin offsets " << endl;
-    for (int i = 0; i < totalBins; ++i){
-        cout << binOffsets[i] << ",";
-    }
-    cout << endl;
-
-    
-    cout << "debugging bin update counter" << endl;
-    for (int i = 0; i < totalBins; ++i){
-        cout << binUpdateCounter[i] << ",";
-    }
-    cout << endl;
 
     // move particles to the correct bin_indices, updating updateCounter
     for (int i = 0; i < num_parts; ++i){
         int bin = myBin[i];
-        cout << "   bin is " << bin << endl;
-        binIndices[binUpdateCounter[bin]] = i;
-        cout << "   bin update counter is " << binUpdateCounter[bin] << endl;
-        binUpdateCounter[bin]++;
+        binCounts[bin]--;
+        binIndices[binOffsets[bin] + binCounts[bin]] = i;
     }
-
-    
-
-    cout << "debugging bin indices" << endl;
-    for (int i = 0; i < num_parts; ++i){
-        cout << binIndices[i] << ",";
-    }
-    cout << endl;
-
 
     // APPLY FORCE
     // apply force, only to those in the correct neighboring bins
