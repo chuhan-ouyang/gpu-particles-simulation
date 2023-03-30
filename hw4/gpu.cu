@@ -1,6 +1,9 @@
 #include "common.h"
 #include <cuda.h>
 #include <thrust/scan.h>
+#include <cstdio>
+#include <cstdlib>
+
 
 #define NUM_THREADS 256
 
@@ -26,8 +29,8 @@ __device__ void apply_force_gpu(particle_t& particle, particle_t& neighbor) {
     particle.ay += coef * dy;
 }
 
-// __host__ __device__ void prefix_sum(int totalBins, int* binOffsets, int* binCounts){
-//     thrust::inclusive_scan(binCounts, binCounts + totalBins, binOffsets + 1);
+// void prefix_sum(int totalBins, int* binOffsets, int* binCounts){
+//     thrust::inclusive_scan(binCounts, binCounts + totalBins, binOffsets);
 // }
 
 __global__ void calculate_bin_counts(particle_t* particles, int num_parts, int numRows, int* myBin, int* binCounts){
@@ -45,9 +48,7 @@ __global__ void calculate_bin_counts(particle_t* particles, int num_parts, int n
     //prefix_sum(totalBins, binOffsets, binCounts);
 }
 
-
-
-__global__ void reshuffle(int num_parts, int* binIndices, int* binCounts, int* binOffsets, int* myBin){
+__global__ void reshuffle(int num_parts, int* binIndices, int* binCounts, int* binOffsets, int* myBin, int totalBins){
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
     if (tid >= num_parts){
         return;
@@ -60,6 +61,7 @@ __global__ void reshuffle(int num_parts, int* binIndices, int* binCounts, int* b
 
 __global__ void compute_forces_gpu(particle_t* particles, int num_parts, int numRows, int* myBin, int* binOffsets, int* binIndices) {
     // Get thread (particle) ID
+
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
     if (tid >= num_parts){
             return;
@@ -138,7 +140,6 @@ __global__ void compute_forces_gpu(particle_t* particles, int num_parts, int num
 }
 
 __global__ void move_gpu(particle_t* particles, int num_parts, double& size) {
-
     // Get thread (particle) ID
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
     if (tid >= num_parts)
@@ -179,6 +180,13 @@ void init_simulation(particle_t* parts, int num_parts, double size) {
     cudaMalloc((void**) &binOffsets, (totalBins + 1) * sizeof(int));
 }
 
+__global__ void prefix_sum(int* binCounts, int* binOffsets, int totalBins) {
+    for (int i = 0; i < totalBins; ++i){
+        binOffsets[i + 1] = binOffsets[i] + binCounts[i];
+    }
+    
+}
+
 void simulate_one_step(particle_t* parts, int num_parts, double size) {
     // parts live in GPU memory
     // Rewrite this function
@@ -186,17 +194,15 @@ void simulate_one_step(particle_t* parts, int num_parts, double size) {
     // count number of particlces in each bin
     calculate_bin_counts<<<blks, NUM_THREADS>>>(parts, num_parts, numRows, myBin, binCounts);
 
+
     // update offset array base on bin counts
-    //prefix_sum<<<blks, NUM_THREADS>>>(totalBins, binOffsets, binCounts);
+    //thrust::inclusive_scan(binCounts, binCounts + 2, binOffsets);
     // thrust::inclusive_scan(binCounts, binCounts + totalBins, binOffsets + 1);
 
-    // binOffsets[0] = 0;
-    // for (int i = 0; i < totalBins; ++i){
-    //     binOffsets[i + 1] = binOffsets[i] + binCounts[i];
-    // }
+    prefix_sum<<<blks, NUM_THREADS>>>(binCounts, binOffsets, totalBins);
 
     // update bin indices array (sorting)
-    reshuffle<<<blks, NUM_THREADS>>>(num_parts, binIndices, binCounts, binOffsets, myBin);
+    reshuffle<<<blks, NUM_THREADS>>>(num_parts, binIndices, binCounts, binOffsets, myBin, totalBins);
 
     // compute forces
     compute_forces_gpu<<<blks, NUM_THREADS>>>(parts, num_parts, numRows, myBin, binOffsets, binIndices);
