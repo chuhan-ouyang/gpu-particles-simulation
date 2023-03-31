@@ -91,76 +91,80 @@ __global__ void compute_forces_gpu(particle_t* particles, int num_parts, int num
             return;
     }
 
-    int col = particles[tid].x / cutoff;
-    int row = particles[tid].y / cutoff;
-    int bin = myBin[tid];
-
-    bool hasLeft = col - 1 >= 0;
-    bool hasRight = col + 1 < numRows;
-    bool hasTop = row - 1 >= 0;
-    bool hasBottom = row + 1 < numRows;
-
-    // current
-    for (int j = binOffsets[bin]; j < binOffsets[bin + 1]; ++j){
-        apply_force_gpu(particles[tid], particles[binIndices[j]]);
+    for (int i = 0; i < num_parts; ++i){
+        apply_force_gpu(particles[tid], particles[i]);
     }
 
-    // left
-    if (hasLeft){
-        for (int j = binOffsets[bin - 1]; j < binOffsets[bin]; ++j){
-            apply_force_gpu(particles[tid], particles[binIndices[j]]);
-        }
-    }
+    // int col = particles[tid].x / cutoff;
+    // int row = particles[tid].y / cutoff;
+    // int bin = myBin[tid];
 
-    // right
-    if (hasRight){
-        for (int j = binOffsets[bin + 1]; j < binOffsets[bin + 2]; ++j){
-            apply_force_gpu(particles[tid], particles[binIndices[j]]);
-        }
-    }
+    // bool hasLeft = col - 1 >= 0;
+    // bool hasRight = col + 1 < numRows;
+    // bool hasTop = row - 1 >= 0;
+    // bool hasBottom = row + 1 < numRows;
 
-    if (hasTop){
-        // current
-        for (int j = binOffsets[bin - numRows]; j < binOffsets[bin - numRows + 1]; ++j){
-            apply_force_gpu(particles[tid], particles[binIndices[j]]);
-        }
+    // // current
+    // for (int j = binOffsets[bin]; j < binOffsets[bin + 1]; ++j){
+    //     apply_force_gpu(particles[tid], particles[binIndices[j]]);
+    // }
 
-        // left
-        if (hasLeft){
-            for (int j = binOffsets[bin - numRows - 1]; j < binOffsets[bin - numRows]; ++j){
-                apply_force_gpu(particles[tid], particles[binIndices[j]]);
-            }
-        }
+    // // left
+    // if (hasLeft){
+    //     for (int j = binOffsets[bin - 1]; j < binOffsets[bin]; ++j){
+    //         apply_force_gpu(particles[tid], particles[binIndices[j]]);
+    //     }
+    // }
 
-        // right
-        if (hasRight){
-            for (int j = binOffsets[bin - numRows + 1]; j < binOffsets[bin - numRows + 2]; ++j){
-                apply_force_gpu(particles[tid], particles[binIndices[j]]);
-            }
-        }
+    // // right
+    // if (hasRight){
+    //     for (int j = binOffsets[bin + 1]; j < binOffsets[bin + 2]; ++j){
+    //         apply_force_gpu(particles[tid], particles[binIndices[j]]);
+    //     }
+    // }
 
-    }
+    // if (hasTop){
+    //     // current
+    //     for (int j = binOffsets[bin - numRows]; j < binOffsets[bin - numRows + 1]; ++j){
+    //         apply_force_gpu(particles[tid], particles[binIndices[j]]);
+    //     }
 
-    if (hasBottom){
-        // current
-        for (int j = binOffsets[bin + numRows]; j < binOffsets[bin + numRows + 1]; ++j){
-            apply_force_gpu(particles[tid], particles[binIndices[j]]);
-        }
+    //     // left
+    //     if (hasLeft){
+    //         for (int j = binOffsets[bin - numRows - 1]; j < binOffsets[bin - numRows]; ++j){
+    //             apply_force_gpu(particles[tid], particles[binIndices[j]]);
+    //         }
+    //     }
 
-        // left
-        if (hasLeft){
-            for (int j = binOffsets[bin + numRows - 1]; j < binOffsets[bin + numRows]; ++j){
-                apply_force_gpu(particles[tid], particles[binIndices[j]]);
-            }
-        }
+    //     // right
+    //     if (hasRight){
+    //         for (int j = binOffsets[bin - numRows + 1]; j < binOffsets[bin - numRows + 2]; ++j){
+    //             apply_force_gpu(particles[tid], particles[binIndices[j]]);
+    //         }
+    //     }
 
-        // right
-        if (hasRight){
-            for (int j = binOffsets[bin + numRows + 1]; j < binOffsets[bin + numRows + 2]; ++j){
-                apply_force_gpu(particles[tid], particles[binIndices[j]]);
-            }
-        }
-    }
+    // }
+
+    // if (hasBottom){
+    //     // current
+    //     for (int j = binOffsets[bin + numRows]; j < binOffsets[bin + numRows + 1]; ++j){
+    //         apply_force_gpu(particles[tid], particles[binIndices[j]]);
+    //     }
+
+    //     // left
+    //     if (hasLeft){
+    //         for (int j = binOffsets[bin + numRows - 1]; j < binOffsets[bin + numRows]; ++j){
+    //             apply_force_gpu(particles[tid], particles[binIndices[j]]);
+    //         }
+    //     }
+
+    //     // right
+    //     if (hasRight){
+    //         for (int j = binOffsets[bin + numRows + 1]; j < binOffsets[bin + numRows + 2]; ++j){
+    //             apply_force_gpu(particles[tid], particles[binIndices[j]]);
+    //         }
+    //     }
+    // }
 }
 
 __global__ void move_gpu(particle_t* particles, int num_parts, double size) {
@@ -202,13 +206,6 @@ void init_simulation(particle_t* parts, int num_parts, double size) {
     cudaMalloc((void**) &binIndices, num_parts * sizeof(int));
     cudaMalloc((void**) &binCounts, totalBins * sizeof(int));
     cudaMalloc((void**) &binOffsets, (totalBins + 1) * sizeof(int));
-}
-
-__global__ void prefix_sum(int* binCounts, int* binOffsets, int totalBins) {
-    for (int i = 0; i < totalBins; ++i){
-        binOffsets[i + 1] = binOffsets[i] + binCounts[i];
-    }
-    
 }
 
 void simulate_one_step(particle_t* parts, int num_parts, double size) {
