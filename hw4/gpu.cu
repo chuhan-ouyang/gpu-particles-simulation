@@ -1,9 +1,10 @@
 #include "common.h"
 #include <cuda.h>
 #include <thrust/scan.h>
+#include <thrust/device_ptr.h>
+#include <thrust/fill.h>
 #include <cstdio>
 #include <cstdlib>
-
 
 #define NUM_THREADS 256
 
@@ -16,13 +17,26 @@ static int* binCounts; // binCounts[i] is the number of particles in bin i
 static int* binOffsets;  // binOffsets[i] is the offset of bin i in binIndices
 static int* binIndices;  // binIndices track indices in sorted bin order
 
-// use thrust device ptr to copy the binCounts
-// input: binCounts, output: binOffsets; both need to be device ptr
+ 
+__device__ double atomicAdd1(double* address, double val)
+{
+    unsigned long long int* address_as_ull =
+                              (unsigned long long int*)address;
+    unsigned long long int old = *address_as_ull, assumed;
 
-// need atomic structure here
-// must use atomic 
+    do {
+        assumed = old;
+        old = atomicCAS(address_as_ull, assumed,
+                        __double_as_longlong(val +
+                               __longlong_as_double(assumed)));
 
-// the only device 
+    // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)
+    } while (assumed != old);
+
+    return __longlong_as_double(old);
+}
+ 
+
 __device__ void apply_force_gpu(particle_t& particle, particle_t& neighbor) {
     double dx = neighbor.x - particle.x;
     double dy = neighbor.y - particle.y;
@@ -32,18 +46,16 @@ __device__ void apply_force_gpu(particle_t& particle, particle_t& neighbor) {
     r2 = (r2 > min_r * min_r) ? r2 : min_r * min_r;
     double r = sqrt(r2);
     double coef = (1 - cutoff / r) / r2 / mass;
-    particle.ax += coef * dx;
-    particle.ay += coef * dy;
+
+   // particle.ax += coef * dx;
+    atomicAdd1(&particle.ax, coef * dx);
+   // particle.ay += coef * dy;
+    atomicAdd1(&particle.ay, coef * dy);
 }
 
 // void prefix_sum(int totalBins, int* binOffsets, int* binCounts){
 //     thrust::inclusive_scan(binCounts, binCounts + totalBins, binOffsets);
 // }
-
-// sorting the bin Indices; put indices of particles into this 'binIndcies' array such that it is sorted by binID
-// loop through all particles, compute bin ID, 
-// we have binCounts
-// curent particle is in second bin, know the offset, just need to put that in the n + 1..
 
 __global__ void calculate_bin_counts(particle_t* particles, int num_parts, int numRows, int* myBin, int* binCounts){
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -71,28 +83,14 @@ __global__ void reshuffle(int num_parts, int* binIndices, int* binCounts, int* b
     binIndices[binOffsets[bin] + binCounts[bin]] = tid;
 }
 
-// prefix sum calculated
-// bin Indices: sorted by bin id
-
-// use atomic add in compute force
 __global__ void compute_forces_gpu(particle_t* particles, int num_parts, int numRows, int* myBin, int* binOffsets, int* binIndices) {
     // Get thread (particle) ID
-    
-    // need strides
+
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
     if (tid >= num_parts){
             return;
     }
-    
-    // one thread takes care of one bin
-    // first for loop looping over all particles in this bin
-    // inner loop loop over all in the neighbor
-    
-    // when apply force, update forces in pairs
-    // compute once but update the force for two particles at a time
-    // when you do 9 neighbors, just compute the upper left, upper, upper right, left and itself
-    
-    // column and row of this current bin number 
+
     int col = particles[tid].x / cutoff;
     int row = particles[tid].y / cutoff;
     int bin = myBin[tid];
@@ -165,7 +163,7 @@ __global__ void compute_forces_gpu(particle_t* particles, int num_parts, int num
     }
 }
 
-__global__ void move_gpu(particle_t* particles, int num_parts, double& size) {
+__global__ void move_gpu(particle_t* particles, int num_parts, double size) {
     // Get thread (particle) ID
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
     if (tid >= num_parts)
@@ -195,14 +193,9 @@ void init_simulation(particle_t* parts, int num_parts, double size) {
     // parts live in GPU memory
     // Do not do any particle simulation here
 
-    blks = (num_parts + NUM_THREADS - 1) / NUM_THREADS; // for large particle sizes, get numnb
-    
-    //cudaGetDevice(&devId); 
-    //cudaDeviceGetAttribute(&numSMs, cudaDevAttrMultiProcessorCount, devId);
-    //numRows = (size / cutoff) + 1;
-    //totalBins = numRows * numRows;
-    //number of threads should be multiple of 32
-    //number of blocks should be multiple of SMs (can try with different mulitple), need stride with number of threads
+    blks = (num_parts + NUM_THREADS - 1) / NUM_THREADS;
+    numRows = (size / cutoff) + 1;
+    totalBins = numRows * numRows;
 
     // allocate memory for the arrays
     cudaMalloc((void**) &myBin, num_parts * sizeof(int));
@@ -228,11 +221,9 @@ void simulate_one_step(particle_t* parts, int num_parts, double size) {
 
     // update offset array base on bin counts
     //thrust::inclusive_scan(binCounts, binCounts + 2, binOffsets);
-    // thrust::inclusive_scan(binCounts, binCounts + totalBins, binOffsets + 1);
-    thrust::device_ptr<int> binCounts_devide(binCounts);
     thrust::device_ptr<int> binCounts_device(binCounts);
-    thrust::inclusive_scan(binCounts, binCounts + totalBins, binOffsets);
-    //prefix_sum<<<blks, NUM_THREADS>>>(binCounts_devide, binCounts_devide, binCounts_device);
+    thrust::device_ptr<int> binOffsets_device(binOffsets + 1);
+    thrust::inclusive_scan(binCounts_device, binCounts_device + totalBins, binOffsets_device);
 
     // update bin indices array (sorting)
     reshuffle<<<blks, NUM_THREADS>>>(num_parts, binIndices, binCounts, binOffsets, myBin, totalBins);
