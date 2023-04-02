@@ -90,15 +90,6 @@ __global__ void compute_forces_gpu(particle_t* particles, int num_parts, int num
             return;
     }
 
-    if (tid == 0){
-        printf("debugging bin indices\n");
-        printf("step %d\n", step);
-        for (int i = 0; i < num_parts; ++i){
-            printf("%d,", binIndices[i]);
-        }
-        printf("\n");
-    }
-
     int col = particles[tid].x / cutoff;
     int row = particles[tid].y / cutoff;
     int bin = myBin[tid];
