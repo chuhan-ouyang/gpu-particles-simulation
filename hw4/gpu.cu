@@ -5,6 +5,7 @@
 #include <thrust/fill.h>
 #include <cstdio>
 #include <cstdlib>
+#include "device_functions.h"
 
 #define NUM_THREADS 256
 
@@ -38,7 +39,11 @@ __device__ double atomicAdd1(double* address, double val)
 }
  
 
-__device__ void apply_force_gpu(particle_t& particle, particle_t& neighbor) {
+__device__ void apply_force_gpu(particle_t& particle, particle_t& neighbor, int step) {
+    printf("step: %d\n", step);
+    printf("apply force on: (%f, %f) and (%f, %f)\n", particle.x, particle.y, neighbor.x, neighbor.y);
+    printf("\n");
+
     double dx = neighbor.x - particle.x;
     double dy = neighbor.y - particle.y;
     double r2 = dx * dx + dy * dy;
@@ -70,27 +75,65 @@ __global__ void calculate_bin_counts(particle_t* particles, int num_parts, int n
         }
     }
 
+    
+
     particles[tid].ax = particles[tid].ay = 0;
     int col = particles[tid].x / cutoff;
     int row = particles[tid].y / cutoff;
     int bin = col + row * numRows;
     myBin[tid] = bin;
+    if (step == 42){
+        printf("tid before: %d\n", tid);
+        printf("bin: %d\n", bin);
+    }
     atomicAdd(&binCounts[bin], 1);
-    //prefix_sum(totalBins, binOffsets, binCounts);
+    if (step == 42){
+        printf("tid after: %d\n", tid);
+        printf("binCounts: %d\n", binCounts[bin]);
+    }
 }
 
-__global__ void reshuffle(int num_parts, int* binIndices, int* binCounts, int* binOffsets, int* myBin, int totalBins){
+__global__ void reshuffle(int num_parts, int* binIndices, int* binCounts, int* binOffsets, int* myBin, int totalBins, int step){
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
     if (tid >= num_parts){
         return;
     }
 
+    if (tid == 0){
+        printf("debugging myBin\n");
+        printf("step %d\n", step);
+        for (int i = 0; i < num_parts; ++i){
+            printf("particle %d: %d,", i, myBin[i]);
+        }
+        printf("\n");
+    }
+
+    if (tid == 0){
+        printf("debugging binCounts\n");
+        printf("step %d\n", step);
+        for (int i = 0; i < totalBins; ++i){
+            printf("%d,", binCounts[i]);
+        }
+        printf("\n");
+    }
+
     int bin = myBin[tid];
-    atomicSub(&binCounts[bin], 1);
-    binIndices[binOffsets[bin] + binCounts[bin]] = tid;
+    // if (step == 72){
+    //     printf("step 72 before\n");
+    //     printf("tid: %d\n", tid);
+    //     printf("binCounts: %d\n", binCounts[bin]);
+    // }
+    // if (step == 72){
+    //     printf("step 72\n");
+    //     printf("tid: %d\n", tid);
+    //     printf("binCounts: %d\n", binCounts[bin]);
+    //     printf("%d\n", binOffsets[bin] + binCounts[bin]);
+    // }
+    // first read, then - 1
+    binIndices[binOffsets[bin] + atomicExch(&binCounts[bin], binCounts[bin] - 1) - 1] = tid;
 }
 
-__global__ void compute_forces_gpu(particle_t* particles, int num_parts, int numRows, int* myBin, int* binOffsets, int* binIndices) {
+__global__ void compute_forces_gpu(particle_t* particles, int num_parts, int numRows, int* myBin, int* binOffsets, int* binIndices, int step, int totalBins) {
     // Get thread (particle) ID
 
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -98,8 +141,22 @@ __global__ void compute_forces_gpu(particle_t* particles, int num_parts, int num
             return;
     }
 
-    for (int i = 0; i < num_parts; ++i){
-        apply_force_gpu(particles[tid], particles[i]);
+    if (tid == 0){
+        printf("debugging offsets\n");
+        printf("step %d\n", step);
+        for (int i = 0; i < totalBins; ++i){
+            printf("%d,", binOffsets[i]);
+        }
+        printf("\n");
+    }
+
+    if (tid == 0){
+        printf("debugging bin indices\n");
+        printf("step %d\n", step);
+        for (int i = 0; i < num_parts; ++i){
+            printf("%d,", binIndices[i]);
+        }
+        printf("\n");
     }
 
     int col = particles[tid].x / cutoff;
@@ -113,40 +170,40 @@ __global__ void compute_forces_gpu(particle_t* particles, int num_parts, int num
 
     // current
     for (int j = binOffsets[bin]; j < binOffsets[bin + 1]; ++j){
-        apply_force_gpu(particles[tid], particles[binIndices[j]]);
+        apply_force_gpu(particles[tid], particles[binIndices[j]], step);
     }
 
     // left
     if (hasLeft){
         for (int j = binOffsets[bin - 1]; j < binOffsets[bin]; ++j){
-            apply_force_gpu(particles[tid], particles[binIndices[j]]);
+            apply_force_gpu(particles[tid], particles[binIndices[j]], step);
         }
     }
 
     // right
     if (hasRight){
         for (int j = binOffsets[bin + 1]; j < binOffsets[bin + 2]; ++j){
-            apply_force_gpu(particles[tid], particles[binIndices[j]]);
+            apply_force_gpu(particles[tid], particles[binIndices[j]], step);
         }
     }
 
     if (hasTop){
         // current
         for (int j = binOffsets[bin - numRows]; j < binOffsets[bin - numRows + 1]; ++j){
-            apply_force_gpu(particles[tid], particles[binIndices[j]]);
+            apply_force_gpu(particles[tid], particles[binIndices[j]], step);
         }
 
         // left
         if (hasLeft){
             for (int j = binOffsets[bin - numRows - 1]; j < binOffsets[bin - numRows]; ++j){
-                apply_force_gpu(particles[tid], particles[binIndices[j]]);
+                apply_force_gpu(particles[tid], particles[binIndices[j]], step);
             }
         }
 
         // right
         if (hasRight){
             for (int j = binOffsets[bin - numRows + 1]; j < binOffsets[bin - numRows + 2]; ++j){
-                apply_force_gpu(particles[tid], particles[binIndices[j]]);
+                apply_force_gpu(particles[tid], particles[binIndices[j]], step);
             }
         }
 
@@ -155,20 +212,20 @@ __global__ void compute_forces_gpu(particle_t* particles, int num_parts, int num
     if (hasBottom){
         // current
         for (int j = binOffsets[bin + numRows]; j < binOffsets[bin + numRows + 1]; ++j){
-            apply_force_gpu(particles[tid], particles[binIndices[j]]);
+            apply_force_gpu(particles[tid], particles[binIndices[j]], step);
         }
 
         // left
         if (hasLeft){
             for (int j = binOffsets[bin + numRows - 1]; j < binOffsets[bin + numRows]; ++j){
-                apply_force_gpu(particles[tid], particles[binIndices[j]]);
+                apply_force_gpu(particles[tid], particles[binIndices[j]], step);
             }
         }
 
         // right
         if (hasRight){
             for (int j = binOffsets[bin + numRows + 1]; j < binOffsets[bin + numRows + 2]; ++j){
-                apply_force_gpu(particles[tid], particles[binIndices[j]]);
+                apply_force_gpu(particles[tid], particles[binIndices[j]], step);
             }
         }
     }
@@ -230,10 +287,10 @@ void simulate_one_step(particle_t* parts, int num_parts, double size) {
     thrust::inclusive_scan(binCounts_device, binCounts_device + totalBins, binOffsets_device);
 
     // update bin indices array (sorting)
-    reshuffle<<<blks, NUM_THREADS>>>(num_parts, binIndices, binCounts, binOffsets, myBin, totalBins);
+    reshuffle<<<blks, NUM_THREADS>>>(num_parts, binIndices, binCounts, binOffsets, myBin, totalBins, step);
 
     // compute forces
-    compute_forces_gpu<<<blks, NUM_THREADS>>>(parts, num_parts, numRows, myBin, binOffsets, binIndices);
+    compute_forces_gpu<<<blks, NUM_THREADS>>>(parts, num_parts, numRows, myBin, binOffsets, binIndices, step, totalBins);
 
     // move particles
     move_gpu<<<blks, NUM_THREADS>>>(parts, num_parts, size);
