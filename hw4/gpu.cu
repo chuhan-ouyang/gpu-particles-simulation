@@ -62,8 +62,6 @@ __global__ void calculate_bin_counts(particle_t* particles, int num_parts, int n
     if (tid >= num_parts){
         return;
     }
-
-
     particles[tid].ax = particles[tid].ay = 0;
     int col = particles[tid].x / cutoff;
     int row = particles[tid].y / cutoff;
@@ -74,13 +72,14 @@ __global__ void calculate_bin_counts(particle_t* particles, int num_parts, int n
 
 __global__ void reshuffle(int num_parts, int* binIndices, int* binCounts, int* binOffsets, int* myBin, int totalBins, int step){
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    if (tid == 0){
-        for (int i = 0; i < num_parts; ++i){
-            int bin = myBin[i];
-            binIndices[binOffsets[bin] + binCounts[bin] - 1] = i;
-            binCounts[bin]--;
-        }
+
+    if (tid >= num_parts){
+        return;
     }
+    
+    int bin = myBin[tid];
+    int position = atomicSub(&binCounts[bin], 1);
+    binIndices[binOffsets[bin] + position - 1] = tid;
 }
 
 __global__ void compute_forces_gpu(particle_t* particles, int num_parts, int numRows, int* myBin, int* binOffsets, int* binIndices, int step, int totalBins) {
@@ -89,6 +88,15 @@ __global__ void compute_forces_gpu(particle_t* particles, int num_parts, int num
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
     if (tid >= num_parts){
             return;
+    }
+
+    if (tid == 0){
+        printf("debugging bin indices\n");
+        printf("step %d\n", step);
+        for (int i = 0; i < num_parts; ++i){
+            printf("%d,", binIndices[i]);
+        }
+        printf("\n");
     }
 
     int col = particles[tid].x / cutoff;
