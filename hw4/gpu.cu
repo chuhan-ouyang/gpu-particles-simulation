@@ -38,6 +38,25 @@ __device__ double atomicAdd1(double* address, double val)
     return __longlong_as_double(old);
 }
  
+ __device__ void apply_force_gpu_pairs(particle_t& particle, particle_t& neighbor, int step) {
+
+    double dx = neighbor.x - particle.x;
+    double dy = neighbor.y - particle.y;
+    double r2 = dx * dx + dy * dy;
+    if (r2 > cutoff * cutoff)
+        return;
+    r2 = (r2 > min_r * min_r) ? r2 : min_r * min_r;
+    double r = sqrt(r2);
+    double coef = (1 - cutoff / r) / r2 / mass;
+
+   // particle.ax += coef * dx;
+    atomicAdd1(&particle.ax, coef * dx);
+   // particle.ay += coef * dy;
+    atomicAdd1(&particle.ay, coef * dy);
+    atomicAdd1(&neighbor.ax, -coef * dx);
+    atomicAdd1(&neighbor.ay, -coef * dy);
+}
+
 
 __device__ void apply_force_gpu(particle_t& particle, particle_t& neighbor, int step) {
 
@@ -101,62 +120,34 @@ __global__ void compute_forces_gpu(particle_t* particles, int num_parts, int num
 
     // current
     for (int j = binOffsets[bin]; j < binOffsets[bin + 1]; ++j){
-        apply_force_gpu(particles[tid], particles[binIndices[j]], step);
-    }
-
-    // left
-    if (hasLeft){
-        for (int j = binOffsets[bin - 1]; j < binOffsets[bin]; ++j){
-            apply_force_gpu(particles[tid], particles[binIndices[j]], step);
+        if (tid < binIndices[j]){
+            apply_force_gpu_pairs(particles[tid], particles[binIndices[j]], step);
         }
     }
-
-    // right
+ 
     if (hasRight){
         for (int j = binOffsets[bin + 1]; j < binOffsets[bin + 2]; ++j){
-            apply_force_gpu(particles[tid], particles[binIndices[j]], step);
+            apply_force_gpu_pairs(particles[tid], particles[binIndices[j]], step);
         }
-    }
-
-    if (hasTop){
-        // current
-        for (int j = binOffsets[bin - numRows]; j < binOffsets[bin - numRows + 1]; ++j){
-            apply_force_gpu(particles[tid], particles[binIndices[j]], step);
-        }
-
-        // left
-        if (hasLeft){
-            for (int j = binOffsets[bin - numRows - 1]; j < binOffsets[bin - numRows]; ++j){
-                apply_force_gpu(particles[tid], particles[binIndices[j]], step);
-            }
-        }
-
-        // right
-        if (hasRight){
-            for (int j = binOffsets[bin - numRows + 1]; j < binOffsets[bin - numRows + 2]; ++j){
-                apply_force_gpu(particles[tid], particles[binIndices[j]], step);
-            }
-        }
-
     }
 
     if (hasBottom){
         // current
         for (int j = binOffsets[bin + numRows]; j < binOffsets[bin + numRows + 1]; ++j){
-            apply_force_gpu(particles[tid], particles[binIndices[j]], step);
+            apply_force_gpu_pairs(particles[tid], particles[binIndices[j]], step);
         }
 
         // left
         if (hasLeft){
             for (int j = binOffsets[bin + numRows - 1]; j < binOffsets[bin + numRows]; ++j){
-                apply_force_gpu(particles[tid], particles[binIndices[j]], step);
+                apply_force_gpu_pairs(particles[tid], particles[binIndices[j]], step);
             }
         }
 
         // right
         if (hasRight){
             for (int j = binOffsets[bin + numRows + 1]; j < binOffsets[bin + numRows + 2]; ++j){
-                apply_force_gpu(particles[tid], particles[binIndices[j]], step);
+                apply_force_gpu_pairs(particles[tid], particles[binIndices[j]], step);
             }
         }
     }
