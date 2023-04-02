@@ -40,9 +40,6 @@ __device__ double atomicAdd1(double* address, double val)
  
 
 __device__ void apply_force_gpu(particle_t& particle, particle_t& neighbor, int step) {
-    printf("step: %d\n", step);
-    printf("apply force on: (%f, %f) and (%f, %f)\n", particle.x, particle.y, neighbor.x, neighbor.y);
-    printf("\n");
 
     double dx = neighbor.x - particle.x;
     double dy = neighbor.y - particle.y;
@@ -65,32 +62,14 @@ __global__ void calculate_bin_counts(particle_t* particles, int num_parts, int n
     if (tid >= num_parts){
         return;
     }
-    
-    if (tid == 0){
-        printf("debugging particle locations\n");
-        printf("step %d\n", step);
-        for (int i = 0; i < num_parts; ++i){
-            printf("particle %d: (%f, %f)", i, particles[i].x, particles[i].y);
-            printf("\n");
-        }
-    }
 
-    
 
     particles[tid].ax = particles[tid].ay = 0;
     int col = particles[tid].x / cutoff;
     int row = particles[tid].y / cutoff;
     int bin = col + row * numRows;
     myBin[tid] = bin;
-    if (step == 42){
-        printf("tid before: %d\n", tid);
-        printf("bin: %d\n", bin);
-    }
     atomicAdd(&binCounts[bin], 1);
-    if (step == 42){
-        printf("tid after: %d\n", tid);
-        printf("binCounts: %d\n", binCounts[bin]);
-    }
 }
 
 __global__ void reshuffle(int num_parts, int* binIndices, int* binCounts, int* binOffsets, int* myBin, int totalBins, int step){
@@ -110,24 +89,6 @@ __global__ void compute_forces_gpu(particle_t* particles, int num_parts, int num
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
     if (tid >= num_parts){
             return;
-    }
-
-    if (tid == 0){
-        printf("debugging offsets\n");
-        printf("step %d\n", step);
-        for (int i = 0; i < totalBins; ++i){
-            printf("%d,", binOffsets[i]);
-        }
-        printf("\n");
-    }
-
-    if (tid == 0){
-        printf("debugging bin indices\n");
-        printf("step %d\n", step);
-        for (int i = 0; i < num_parts; ++i){
-            printf("%d,", binIndices[i]);
-        }
-        printf("\n");
     }
 
     int col = particles[tid].x / cutoff;
