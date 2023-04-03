@@ -54,23 +54,6 @@ __device__ double atomicAdd1(double* address, double val)
     atomicAdd1(&neighbor.ay, -coef * dy);
 }
 
-
-__device__ void apply_force_gpu(particle_t& particle, particle_t& neighbor) {
-
-    double dx = neighbor.x - particle.x;
-    double dy = neighbor.y - particle.y;
-    double r2 = dx * dx + dy * dy;
-    if (r2 > cutoff * cutoff)
-        return;
-    r2 = (r2 > min_r * min_r) ? r2 : min_r * min_r;
-    double r = sqrt(r2);
-    double coef = (1 - cutoff / r) / r2 / mass;
-
-    atomicAdd1(&particle.ax, coef * dx);
-    atomicAdd1(&particle.ay, coef * dy);
-}
-
-
 __global__ void calculate_bin_counts(particle_t* particles, int num_parts, int numRows, int* myBin, int* binCounts){
     int index = threadIdx.x + blockIdx.x * blockDim.x;
     int stride = blockDim.x * gridDim.x;
@@ -121,56 +104,6 @@ __global__ void compute_forces_gpu_new(particle_t* particles, int num_parts, int
                     for (int l = binOffsets[bin]; l < binOffsets[bin + 1]; ++l){
                         apply_force_gpu_pairs(particles[binIndices[k]], particles[binIndices[l]]);
                     }
-                }
-            }
-        }
-    }
-}
-
-__global__ void compute_forces_gpu(particle_t* particles, int num_parts, int numRows, int* myBin, int* binOffsets, int* binIndices, int totalBins) {
-    // Get thread (particle) ID
-
-    int index = threadIdx.x + blockIdx.x * blockDim.x;
-    int stride = blockDim.x * gridDim.x;
-
-    for (int i = index; i < num_parts; i += stride){
-        int col = particles[i].x / cutoff;
-        int row = particles[i].y / cutoff;
-        int bin = myBin[i];
-
-        bool hasLeft = col - 1 >= 0;
-        bool hasRight = col + 1 < numRows;
-        bool hasBottom = row + 1 < numRows;
-
-        for (int j = binOffsets[bin]; j < binOffsets[bin + 1]; ++j){
-            if (i < binIndices[j]){
-                apply_force_gpu_pairs(particles[i], particles[binIndices[j]]);
-            }
-        }
-    
-        if (hasRight){
-            for (int j = binOffsets[bin + 1]; j < binOffsets[bin + 2]; ++j){
-                apply_force_gpu_pairs(particles[i], particles[binIndices[j]]);
-            }
-        }
-
-        if (hasBottom){
-            // current
-            for (int j = binOffsets[bin + numRows]; j < binOffsets[bin + numRows + 1]; ++j){
-                apply_force_gpu_pairs(particles[i], particles[binIndices[j]]);
-            }
-
-            // left
-            if (hasLeft){
-                for (int j = binOffsets[bin + numRows - 1]; j < binOffsets[bin + numRows]; ++j){
-                    apply_force_gpu_pairs(particles[i], particles[binIndices[j]]);
-                }
-            }
-
-            // right
-            if (hasRight){
-                for (int j = binOffsets[bin + numRows + 1]; j < binOffsets[bin + numRows + 2]; ++j){
-                    apply_force_gpu_pairs(particles[i], particles[binIndices[j]]);
                 }
             }
         }
